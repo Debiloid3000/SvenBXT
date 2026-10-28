@@ -9,7 +9,8 @@ int gmsgBXTTimer = 0;
 
 void FASTCALL HOOKED_CNihilanth_DyingThink(void* thisptr)
 {
-	g_lpHUDTimer->TimerStop();
+	if (g_lpHUDTimer)
+		g_lpHUDTimer->TimerStop();
 
 	ORIG_CNihilanth_DyingThink(thisptr);
 }
@@ -55,7 +56,11 @@ void SV_Initialize()
 
 void SV_HookStuff()
 {
+	if (g_lpFuncHook_Server)
+		return;
 	g_lpFuncHook_Server = funchook_create();
+	if (!g_lpFuncHook_Server)
+		return;
 
 	int status;
 
@@ -78,5 +83,6 @@ void SV_HookStuff()
 #endif
 
 	CreateHook(Server, CNihilanth_DyingThink);
-	funchook_install(g_lpFuncHook_Server, 0);
+	if (funchook_install(g_lpFuncHook_Server, 0) != FUNCHOOK_ERROR_SUCCESS)
+		Sys_Printf("[Server] Failed to install hooks.\n");
 }

@@ -1,0 +1,73 @@
+name: Release Windows DLL
+
+on:
+  push:
+    tags:
+      - 'v*'
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Existing tag to build and publish (for example v1.0.0)'
+        required: true
+        type: string
+
+permissions:
+  contents: write
+
+concurrency:
+  group: svenbxt-release-${{ github.event.release.tag_name || inputs.tag || github.ref_name }}
+  cancel-in-progress: false
+
+jobs:
+  windows-x86:
+    runs-on: windows-2022
+    steps:
+      - name: Checkout source and funchook
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.tag || github.ref }}
+          submodules: recursive
+
+      - name: Configure x86 Release build
+        shell: pwsh
+        run: cmake -S src -B src/build -G "Visual Studio 17 2022" -A Win32 -DCMAKE_BUILD_TYPE=Release -DFUNCHOOK_BUILD_TESTS=OFF
+
+      - name: Build SvenBXT.dll
+        shell: pwsh
+        run: cmake --build src/build --config Release --parallel 2
+
+      - name: Verify and stage release DLL
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $dll = 'src/build/Release/SvenBXT.dll'
+          if (!(Test-Path $dll)) { throw "Build succeeded but $dll is missing" }
+          New-Item -ItemType Directory -Force dist | Out-Null
+          Copy-Item $dll 'dist/SvenBXT.dll'
+
+      - name: Upload CI artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: SvenBXT-windows-x86
+          path: dist/SvenBXT.dll
+          if-no-files-found: error
+
+      - name: Attach DLL to GitHub Release (create it for a new tag)
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RELEASE_TAG: ${{ github.event.release.tag_name || inputs.tag || github.ref_name }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          if ($env:RELEASE_TAG -notmatch '^v[^\\/]+$') {
+            throw "Release tag must begin with v: $env:RELEASE_TAG"
+          }
+          gh release view $env:RELEASE_TAG --repo $env:GITHUB_REPOSITORY --json tagName --jq .tagName 2>$null | Out-Null
+          if ($LASTEXITCODE -eq 0) {
+            gh release upload $env:RELEASE_TAG dist/SvenBXT.dll --repo $env:GITHUB_REPOSITORY --clobber
+          } else {
+            gh release create $env:RELEASE_TAG dist/SvenBXT.dll --repo $env:GITHUB_REPOSITORY --verify-tag --generate-notes
+          }
+          if ($LASTEXITCODE -ne 0) { throw "Release upload failed" }

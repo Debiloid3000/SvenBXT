@@ -41,11 +41,11 @@ typedef struct Utils
 		const std::array<patterns::PatternWrapper, N>& patterns)
 	{
 		return MemUtils::find_unique_sequence(
-			reinterpret_cast<uintptr_t&>(address),
 			m_Base,
 			m_Length,
 			patterns.cbegin(),
-			patterns.cend());
+			patterns.cend(),
+			reinterpret_cast<uintptr_t&>(address));
 	}
 
 	template <typename Result, size_t N>

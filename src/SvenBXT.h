@@ -112,39 +112,34 @@ extern server_t* sv;
 
 
 #ifdef PLATFORM_WINDOWS
-#define SPTEngineFind(future_name)                                                                                                \
-	{                                                                                                                       \
-		auto f##future_name = utils.FindAsync(ORIG_##future_name, patterns::engine::future_name);                           \
-		auto pattern = f##future_name.get();                                                                                \
-		if (ORIG_##future_name)                                                                                             \
-		{                                                                                                                   \
-			Sys_Printf("[Engine] Found " #future_name " at %p (using the %s pattern).\n", ORIG_##future_name, pattern->name()); \
-		}                                                                                                                   \
-		else                                                                                                                    \
-			Sys_Printf("[Engine] Could not find " #future_name ".\n");															\
-	}
+// A missing signature is normal after an engine update. Do not dereference end().
+#define SPTEngineFind(func_name) do { \
+	auto match = utils.FindSync(ORIG_##func_name, patterns::engine::func_name); \
+	if (match != patterns::engine::func_name.cend() && ORIG_##func_name) \
+		Sys_Printf("[Engine] Found " #func_name " at %p (%s).\n", ORIG_##func_name, match->name()); \
+	else { ORIG_##func_name = nullptr; Sys_Printf("[Engine] " #func_name " unavailable, skipping hook.\n"); } \
+} while (0)
 
-#define SPTServerFind(future_name)                                                                                              \
-	{                                                                                                                           \
-		auto f##future_name = sv_utils.FindAsync(ORIG_##future_name, patterns::server::future_name);                               \
-		auto pattern = f##future_name.get();                                                                                    \
-		if (ORIG_##future_name)                                                                                                 \
-		{                                                                                                                       \
-			Sys_Printf("[Server] Found " #future_name " at %p (using the %s pattern).\n", ORIG_##future_name, pattern->name()); \
-		}                                                                                                                       \
-	}
+#define SPTServerFind(func_name) do { \
+	auto match = sv_utils.FindSync(ORIG_##func_name, patterns::server::func_name); \
+	if (match != patterns::server::func_name.cend() && ORIG_##func_name) \
+		Sys_Printf("[Server] Found " #func_name " at %p (%s).\n", ORIG_##func_name, match->name()); \
+	else { ORIG_##func_name = nullptr; Sys_Printf("[Server] " #func_name " unavailable, skipping hook.\n"); } \
+} while (0)
 #endif
 
-#define CreateHook(lib, func_name)                                                                           \
-	do                                                                                                       \
-	{                                                                                                        \
-		Sys_Printf("[" #lib "] Creating hook for " #func_name "...\n");                                      \
+// Never pass a null hook handle or a failed signature scan to funchook.
+#define CreateHook(lib, func_name) do { \
+	if (!g_lpFuncHook_##lib || !ORIG_##func_name) { \
+		Sys_Printf("[" #lib "] Skipping " #func_name " (no hook handle or target).\n"); \
+	} else { \
 		status = funchook_prepare(g_lpFuncHook_##lib, (void**)&ORIG_##func_name, (void*)HOOKED_##func_name); \
-		if (status == FUNCHOOK_ERROR_SUCCESS)                                                                \
-			Sys_Printf("[" #lib "] Hooked " #func_name "!\n");                                               \
-		else                                                                                                 \
-			Sys_Printf("[" #lib "] Failed to hook " #func_name "! Code: %i\n", status);                      \
-	} while (0)
+		if (status == FUNCHOOK_ERROR_SUCCESS) \
+			Sys_Printf("[" #lib "] Prepared " #func_name ".\n"); \
+		else \
+			Sys_Printf("[" #lib "] Failed to prepare " #func_name ": %i\n", status); \
+	} \
+} while (0)
 
 #else //!__cplusplus
 #error C++ compiler required to compile SvenBXT.h

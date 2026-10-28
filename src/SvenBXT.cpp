@@ -3,6 +3,7 @@
 //
 
 #include "SvenBXT.h"
+#include <chrono>
 
 #ifdef PLATFORM_WINDOWS
 Utils utils = Utils::Utils(NULL, NULL, NULL);
@@ -44,12 +45,11 @@ void SvenBXT_FindEngineStuff()
 	else
 	{
 		Sys_Printf("[hw so] Found cl_enginefuncs at %p.\n", g_lpEngfuncs);
-		SvenBXT_HookClient();
 	}
 
 	// TODO: use GET_VARIABLE define
 	enginefuncs_t** p_engfuncs = (enginefuncs_t**)Sys_GetProcAddress(g_lpEngine, "g_pengfuncsExportedToDlls");
-	g_engfuncs = (*p_engfuncs);
+	g_engfuncs = p_engfuncs ? *p_engfuncs : nullptr;
 	gpGlobals = (globalvars_t*)Sys_GetProcAddress(g_lpEngine, "gGlobalVariables");
 	sv = (server_t*)Sys_GetProcAddress(g_lpEngine, "sv");
 
@@ -76,157 +76,70 @@ void SvenBXT_FindEngineStuff()
 	GET_VARIABLE(Engine, ORIG_SCR_EndLoadingPlaque, _Z20SCR_EndLoadingPlaquev);
 	GET_VARIABLE(Engine, ORIG_GL_EndRendering, _Z15GL_EndRenderingv);
 #else
-	void* handle;
-	static void* base;
-	static size_t size;
+	void* handle = nullptr;
+	void* base = nullptr;
+	size_t size = 0;
 
 	if (!MemUtils::GetModuleInfo(L"hw.dll", &handle, &base, &size))
 	{
-		Sys_Printf("Failed to get module info from engine.\n");
+		Sys_Printf("[Engine] Could not inspect hw.dll, leaving hooks disabled.\n");
 		return;
 	}
 
-	utils = Utils::Utils(handle, base, size);
+	utils = Utils(handle, base, size);
 
-	void* ClientDLL_Init;
-	auto fClientDLL_Init = utils.FindAsync(
-		ClientDLL_Init,
-		patterns::engine::ClientDLL_Init,
-		[&](auto pattern)
+	// Resolve all engine addresses synchronously before any hooks can run.
+	// Hardcoded offsets are valid only for the matching recognized signatures.
+	void* clientInit = nullptr;
+	auto clientPattern = utils.FindSync(clientInit, patterns::engine::ClientDLL_Init);
+	if (clientInit && clientPattern != patterns::engine::ClientDLL_Init.cend())
+	{
+		const auto index = clientPattern - patterns::engine::ClientDLL_Init.cbegin();
+		uintptr_t offset = 0;
+		switch (index) {
+		case 0: case 1: offset = 1; break; // 5.11 / 5.23
+		case 2: offset = 332; break;       // 5.25
+		case 3: offset = 354; break;       // 5.26-rc1 signature
+		default: break;
+		}
+		if (offset && reinterpret_cast<uintptr_t>(clientInit) + offset + sizeof(void*) <=
+		              reinterpret_cast<uintptr_t>(base) + size)
 		{
-			switch (pattern - patterns::engine::ClientDLL_Init.cbegin())
-			{
-			default:
-			case 0: // Sven-5.11
-				Sys_Printf("Searching cl_enginefuncs in Sven-5.11 pattern...\n");
-				g_lpEngfuncs = *reinterpret_cast<cl_enginefunc_t**>(reinterpret_cast<uintptr_t>(ClientDLL_Init) + 1);
+			g_lpEngfuncs = *reinterpret_cast<cl_enginefunc_t**>(reinterpret_cast<uintptr_t>(clientInit) + offset);
+		}
+	}
+	if (!g_lpEngfuncs)
+		Sys_Printf("[Engine] No known client engine signature; client hooks disabled.\n");
 
-				if (g_lpEngfuncs)
-				{
-					Sys_Printf("[Engine] Found cl_enginefuncs at 0x%p.\n", g_lpEngfuncs);
-					SvenBXT_HookClient();
-				}
-				else
-					Sys_Printf("[Engine] Failed to find cl_enginefuncs. Can't hook client.\n");
+	void* loadThisDll = nullptr;
+	auto loadPattern = utils.FindSync(loadThisDll, patterns::engine::LoadThisDll);
+	if (loadThisDll && loadPattern != patterns::engine::LoadThisDll.cend())
+	{
+		const auto index = loadPattern - patterns::engine::LoadThisDll.cbegin();
+		if (index == 0) {
+			g_engfuncs = *reinterpret_cast<enginefuncs_t**>(reinterpret_cast<uintptr_t>(loadThisDll) + 91);
+			gpGlobals = *reinterpret_cast<globalvars_t**>(reinterpret_cast<uintptr_t>(loadThisDll) + 86);
+		} else if (index == 1) {
+			auto indirect = *reinterpret_cast<enginefuncs_t***>(reinterpret_cast<uintptr_t>(loadThisDll) + 109);
+			g_engfuncs = indirect ? *indirect : nullptr;
+			gpGlobals = *reinterpret_cast<globalvars_t**>(reinterpret_cast<uintptr_t>(loadThisDll) + 67);
+		}
+	}
+	if (!g_engfuncs)
+		Sys_Printf("[Engine] No matching server engine-functions signature; server features disabled.\n");
 
-				break;
-
-			case 1: // Sven-5.23
-				Sys_Printf("Searching cl_enginefuncs in Sven-5.23 pattern...\n");
-				g_lpEngfuncs = *reinterpret_cast<cl_enginefunc_t**>(reinterpret_cast<uintptr_t>(ClientDLL_Init) + 1);
-
-				if (g_lpEngfuncs)
-				{
-					Sys_Printf("[Engine] Found cl_enginefuncs at 0x%p.\n", g_lpEngfuncs);
-					SvenBXT_HookClient();
-				}
-				else
-					Sys_Printf("[Engine] Failed to find cl_enginefuncs. Can't hook client.\n");
-
-				break;
-
-			case 2: // Sven-5.25
-				Sys_Printf("Searching cl_enginefuncs in Sven-5.25 pattern...\n");
-				g_lpEngfuncs = *reinterpret_cast<cl_enginefunc_t**>(reinterpret_cast<uintptr_t>(ClientDLL_Init) + 332);
-
-				if (g_lpEngfuncs)
-				{
-					Sys_Printf("[Engine] Found cl_enginefuncs at 0x%p.\n", g_lpEngfuncs);
-					SvenBXT_HookClient();
-				}
-				break;
-			case 3: // Sven-5.26-rc1
-				Sys_Printf("Searching cl_enginefuncs in Sven-5.26-rc1 pattern...\n");
-				g_lpEngfuncs = *reinterpret_cast<cl_enginefunc_t**>(reinterpret_cast<uintptr_t>(ClientDLL_Init) + 354);
-
-				if (g_lpEngfuncs)
-				{
-					Sys_Printf("[Engine] Found cl_enginefuncs at 0x%p.\n", g_lpEngfuncs);
-					SvenBXT_HookClient();
-				}
-				break;
-			}
-		});
-
-	void* LoadThisDll;
-	auto fLoadThisDll = utils.FindAsync(
-		LoadThisDll,
-		patterns::engine::LoadThisDll,
-		[&](auto pattern)
-		{
-			switch (pattern - patterns::engine::LoadThisDll.cbegin())
-			{
-			default:
-			case 0: // Sven-5.11
-				Sys_Printf("Searching g_engfuncs in Sven-5.11 pattern...\n");
-				g_engfuncs = *reinterpret_cast<enginefuncs_t**>(reinterpret_cast<uintptr_t>(LoadThisDll) + 91);
-				gpGlobals = *reinterpret_cast<globalvars_t**>(reinterpret_cast<uintptr_t>(LoadThisDll) + 86);
-
-				if (g_engfuncs)
-					Sys_Printf("[Engine] Found g_engfuncs at 0x%p.\n", g_engfuncs);
-				else
-					Sys_Printf("[Engine] Failed to find g_engfuncs.\n");
-
-				if (gpGlobals)
-					Sys_Printf("[Engine] Found gpGlobals at 0x%p.\n", gpGlobals);
-				else
-					Sys_Printf("[Engine] Failed to find gpGlobals.\n");
-
-				break;
-			case 1: // Sven-5.25
-				Sys_Printf("Searching g_engfuncs in Sven-5.25 pattern...\n");
-				g_engfuncs = (**reinterpret_cast<enginefuncs_t***>(reinterpret_cast<uintptr_t>(LoadThisDll) + 109));
-				gpGlobals = *reinterpret_cast<globalvars_t**>(reinterpret_cast<uintptr_t>(LoadThisDll) + 67);
-
-				if (g_engfuncs)
-					Sys_Printf("[Engine] Found g_engfuncs at 0x%p.\n", g_engfuncs);
-				else
-					Sys_Printf("[Engine] Failed to find g_engfuncs.\n");
-
-				if (gpGlobals)
-					Sys_Printf("[Engine] Found gpGlobals at 0x%p.\n", gpGlobals);
-				else
-					Sys_Printf("[Engine] Failed to find gpGlobals.\n");
-
-				break;
-			}
-		});
-
-	void* Host_ClearMemory;
-	auto fHost_ClearMemory = utils.FindAsync(
-		Host_ClearMemory,
-		patterns::engine::Host_ClearMemory,
-		[&](auto pattern)
-		{
-			switch (pattern - patterns::engine::Host_ClearMemory.cbegin())
-			{
-			default:
-			case 0: // Sven-5.11
-				Sys_Printf("Searching sv in Sven-5.11 pattern...\n");
-				sv = *reinterpret_cast<server_t**>(reinterpret_cast<uintptr_t>(Host_ClearMemory) + 0x5B);
-				if (sv)
-				{
-					Sys_Printf("[Engine] Found sv at 0x%p.\n", sv);
-				}
-				else
-				{
-					Sys_Printf("[Engine] Failed to find sv.\n");
-				}
-				break;
-			case 1: // Sven-5.25
-				Sys_Printf("Searching sv in Sven-5.25 pattern...\n");
-				sv = *reinterpret_cast<server_t**>(reinterpret_cast<uintptr_t>(Host_ClearMemory) + 0x98);
-				if (sv)
-				{
-					Sys_Printf("[Engine] Found sv at 0x%p.\n", sv);
-				}
-				else
-				{
-					Sys_Printf("[Engine] Failed to find sv.\n");
-				}
-				break;
-			}
-		});
+	void* hostClearMemory = nullptr;
+	auto clearPattern = utils.FindSync(hostClearMemory, patterns::engine::Host_ClearMemory);
+	if (hostClearMemory && clearPattern != patterns::engine::Host_ClearMemory.cend())
+	{
+		const auto index = clearPattern - patterns::engine::Host_ClearMemory.cbegin();
+		if (index == 0)
+			sv = *reinterpret_cast<server_t**>(reinterpret_cast<uintptr_t>(hostClearMemory) + 0x5B);
+		else if (index == 1)
+			sv = *reinterpret_cast<server_t**>(reinterpret_cast<uintptr_t>(hostClearMemory) + 0x98);
+	}
+	if (!sv)
+		Sys_Printf("[Engine] Server state not found; host-only features disabled.\n");
 
 	SPTEngineFind(LoadThisDll);
 	SPTEngineFind(SCR_BeginLoadingPlaque);
@@ -239,13 +152,23 @@ void SvenBXT_FindEngineStuff()
 	CreateHook(Engine, LoadThisDll);
 	CreateHook(Engine, SCR_BeginLoadingPlaque);
 	CreateHook(Engine, SCR_EndLoadingPlaque);
-	CreateHook(Engine, GL_EndRendering);
+	// The rendering callback calls both GL helpers and the client engine table.
+	if (ORIG_GL_Begin2D && ORIG_GL_Finish2D && g_lpEngfuncs)
+		CreateHook(Engine, GL_EndRendering);
+	else
+		Sys_Printf("[Engine] Skipping GL_EndRendering: rendering dependencies unavailable.\n");
 
-	funchook_install(g_lpFuncHook_Engine, 0);
+	if (g_lpFuncHook_Engine && funchook_install(g_lpFuncHook_Engine, 0) != FUNCHOOK_ERROR_SUCCESS)
+		Sys_Printf("[Engine] Failed to install hooks.\n");
+
+	if (g_lpEngfuncs)
+		SvenBXT_HookClient();
 }
 
 void SvenBXT_HookClient()
 {
+	if (!g_lpEngfuncs || g_lpFuncHook_Client)
+		return;
 	TRACE("Hooking client...\n");
 #ifdef PLATFORM_WINDOWS
 	g_lpClient = Sys_GetModuleHandle("client");
@@ -260,10 +183,13 @@ void SvenBXT_HookClient()
 	}
 
 	g_lpFuncHook_Client = funchook_create();
-
+	if (!g_lpFuncHook_Client) {
+		Sys_Printf("[Client] Could not allocate hook manager.\n");
+		return;
+	}
 	CL_Initialize();
-
-	funchook_install(g_lpFuncHook_Client, 0);
+	if (funchook_install(g_lpFuncHook_Client, 0) != FUNCHOOK_ERROR_SUCCESS)
+		Sys_Printf("[Client] Failed to install hooks.\n");
 }
 
 void SvenBXT_HookEngine()
@@ -285,6 +211,7 @@ void SvenBXT_UnhookClient()
 	{
 		funchook_uninstall(g_lpFuncHook_Client, 0);
 		funchook_destroy(g_lpFuncHook_Client);
+		g_lpFuncHook_Client = nullptr;
 	}
 }
 
@@ -294,6 +221,7 @@ void SvenBXT_UnhookEngine()
 	{
 		funchook_uninstall(g_lpFuncHook_Engine, 0);
 		funchook_destroy(g_lpFuncHook_Engine);
+		g_lpFuncHook_Engine = nullptr;
 	}
 }
 
@@ -314,8 +242,10 @@ lbl_waitFor:
 		SvenBXT_HookEngine();
 		g_bHasLoaded = true;
 	}
-	else
+	else {
+		std::this_thread::sleep_for(std::chrono::milliseconds(50));
 		goto lbl_waitFor;
+	}
 }
 
 void SvenBXT_Main()
@@ -341,6 +271,11 @@ void SvenBXT_Shutdown()
 {
 	TRACE("Shutting down...\n");
 
+	if (g_lpFuncHook_Server) {
+		funchook_uninstall(g_lpFuncHook_Server, 0);
+		funchook_destroy(g_lpFuncHook_Server);
+		g_lpFuncHook_Server = nullptr;
+	}
 	SvenBXT_UnhookEngine();
 	SvenBXT_UnhookClient();
 
@@ -348,6 +283,12 @@ void SvenBXT_Shutdown()
 }
 
 #ifdef WIN32
+static DWORD WINAPI SvenBXT_Bootstrap(LPVOID)
+{
+	SvenBXT_Main();
+	return 0;
+}
+
 BOOL WINAPI DllMain(HINSTANCE hinstDLL, DWORD fdwReason, LPVOID lpvReserved)
 {
 	switch (fdwReason)
@@ -359,7 +300,8 @@ BOOL WINAPI DllMain(HINSTANCE hinstDLL, DWORD fdwReason, LPVOID lpvReserved)
 		freopen_s(&in, "conin$", "r", stdin);
 		freopen_s(&out, "conout$", "w+", stdout);
 #endif
-		CreateThread(NULL, NULL, reinterpret_cast<LPTHREAD_START_ROUTINE>(SvenBXT_Main), NULL, NULL, NULL);
+		if (HANDLE worker = CreateThread(NULL, 0, SvenBXT_Bootstrap, NULL, 0, NULL))
+			CloseHandle(worker);
 		break;
 
 	case DLL_PROCESS_DETACH:
