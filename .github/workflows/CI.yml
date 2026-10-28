@@ -92,7 +92,7 @@ jobs:
 
       - name: Build Windows version
         if: runner.os == 'Windows'
-        run: msbuild /m /p:OutputPath=${{ steps.strings.outputs.build-output-dir }} /p:Configuration=${{ matrix.build_type }} ${{ steps.strings.outputs.build-output-dir }}/SvenBXT.sln
+        run: cmake --build ${{ steps.strings.outputs.build-output-dir }} --config ${{ matrix.build_type }} --parallel
 
       - name: Prepare artifacts
         run: mkdir -p bin && mv ${{ matrix.bin-path }} bin/

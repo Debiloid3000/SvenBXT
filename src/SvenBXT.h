@@ -116,28 +116,28 @@ extern server_t* sv;
 #define SPTEngineFind(func_name) do { \
 	auto match = utils.FindSync(ORIG_##func_name, patterns::engine::func_name); \
 	if (match != patterns::engine::func_name.cend() && ORIG_##func_name) \
-		Sys_Printf("[Engine] Found " #func_name " at %p (%s).\\n", ORIG_##func_name, match->name()); \
-	else { ORIG_##func_name = nullptr; Sys_Printf("[Engine] " #func_name " unavailable, skipping hook.\\n"); } \
+		Sys_Printf("[Engine] Found " #func_name " at %p (%s).\n", ORIG_##func_name, match->name()); \
+	else { ORIG_##func_name = nullptr; Sys_Printf("[Engine] " #func_name " unavailable, skipping hook.\n"); } \
 } while (0)
 
 #define SPTServerFind(func_name) do { \
 	auto match = sv_utils.FindSync(ORIG_##func_name, patterns::server::func_name); \
 	if (match != patterns::server::func_name.cend() && ORIG_##func_name) \
-		Sys_Printf("[Server] Found " #func_name " at %p (%s).\\n", ORIG_##func_name, match->name()); \
-	else { ORIG_##func_name = nullptr; Sys_Printf("[Server] " #func_name " unavailable, skipping hook.\\n"); } \
+		Sys_Printf("[Server] Found " #func_name " at %p (%s).\n", ORIG_##func_name, match->name()); \
+	else { ORIG_##func_name = nullptr; Sys_Printf("[Server] " #func_name " unavailable, skipping hook.\n"); } \
 } while (0)
 #endif
 
 // Never pass a null hook handle or a failed signature scan to funchook.
 #define CreateHook(lib, func_name) do { \
 	if (!g_lpFuncHook_##lib || !ORIG_##func_name) { \
-		Sys_Printf("[" #lib "] Skipping " #func_name " (no hook handle or target).\\n"); \
+		Sys_Printf("[" #lib "] Skipping " #func_name " (no hook handle or target).\n"); \
 	} else { \
 		status = funchook_prepare(g_lpFuncHook_##lib, (void**)&ORIG_##func_name, (void*)HOOKED_##func_name); \
 		if (status == FUNCHOOK_ERROR_SUCCESS) \
-			Sys_Printf("[" #lib "] Prepared " #func_name ".\\n"); \
+			Sys_Printf("[" #lib "] Prepared " #func_name ".\n"); \
 		else \
-			Sys_Printf("[" #lib "] Failed to prepare " #func_name ": %i\\n", status); \
+			Sys_Printf("[" #lib "] Failed to prepare " #func_name ": %i\n", status); \
 	} \
 } while (0)
 
