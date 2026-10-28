@@ -20,7 +20,7 @@ static void handle_autojump(usercmd_t* cmd)
 {
 	static bool s_jump_was_down_last_frame = false;
 
-	if (sbxt_autojump->value)
+	if (sbxt_autojump && sbxt_autojump->value)
 	{
 		bool should_release_jump = (!UTIL_IsPlayerOnGround() && !UTIL_IsPlayerInWater() && UTIL_IsPlayerWalking());
 
@@ -68,7 +68,7 @@ void HOOKED_CL_CreateMove(float frametime, usercmd_s* cmd, int active)
 {
 	ORIG_CL_CreateMove(frametime, cmd, active);
 
-	if (!g_ppmove)
+	if (!g_ppmove || !cmd)
 		return;
 
 	if (bDucktapDown)

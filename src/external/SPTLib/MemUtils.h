@@ -55,8 +55,9 @@ inline bool GetModuleInfo(void* moduleHandle, void** moduleBase, size_t* moduleS
 	if (!moduleHandle)
 		return false;
 
-	MODULEINFO Info;
-	GetModuleInformation(GetCurrentProcess(), reinterpret_cast<HMODULE>(moduleHandle), &Info, sizeof(Info));
+	MODULEINFO Info = {};
+	if (!GetModuleInformation(GetCurrentProcess(), reinterpret_cast<HMODULE>(moduleHandle), &Info, sizeof(Info)))
+		return false;
 
 	if (moduleBase)
 		*moduleBase = Info.lpBaseOfDll;
@@ -209,6 +210,9 @@ Iterator find_unique_sequence(
 			}
 		}
 	}
+	// No unique pattern found: never return an invalid iterator or stale address.
+	address = 0;
+	return end;
 }
 
 template <typename Result, class Iterator>
