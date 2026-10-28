@@ -2,6 +2,8 @@ name: CI
 
 on:
   push:
+    branches:
+      - new
     paths-ignore:
       - .gitignore
       - README.md
@@ -102,3 +104,39 @@ jobs:
         with:
           path: ./bin
           name: ${{ matrix.artifact }}
+
+  publish-nightly:
+    name: Publish latest successful Windows DLL to Releases
+    if: github.event_name == 'push' && github.ref == 'refs/heads/new'
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    concurrency:
+      group: svenbxt-nightly-release
+      cancel-in-progress: false
+    steps:
+      - name: Download the Windows x86 DLL artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: svenbxt_windows-cl
+          path: release
+
+      - name: Publish DLL as a standalone GitHub Release asset
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RELEASE_TAG: nightly
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -s release/SvenBXT.dll
+          if gh release view "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            gh release upload "$RELEASE_TAG" release/SvenBXT.dll --repo "$GITHUB_REPOSITORY" --clobber
+          else
+            gh release create "$RELEASE_TAG" release/SvenBXT.dll \
+              --repo "$GITHUB_REPOSITORY" \
+              --title "SvenBXT Nightly (Windows x86)" \
+              --prerelease \
+              --target "$GITHUB_SHA" \
+              --notes "Automatic Windows x86 build from commit $GITHUB_SHA. Not yet runtime-tested on all Sven Co-op versions."
+          fi
